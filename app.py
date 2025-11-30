@@ -1,25 +1,34 @@
 import streamlit as st
-from spotipy import Spotify
-from spotipy.oauth2 import SpotifyOAuth
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-st.title("My Music Recommendation App")
+st.title("My Music App")
 
-# Authenticate user with Spotify
-sp = Spotify(auth_manager=SpotifyOAuth(
-    client_id=os.getenv("SPOTIPY_CLIENT_ID"),
-    client_secret=os.getenv("SPOTIPY_CLIENT_SECRET"),
-    redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI"),
-    scope="user-top-read"
-))
+client_id = os.getenv("SPOTIPY_CLIENT_ID")
+client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
 
-st.write("Spotify authentication successful!")
+os.environ["SPOTIPY_CLIENT_ID"] = client_id
+os.environ["SPOTIPY_CLIENT_SECRET"] = client_secret
+os.environ["SPOTIPY_REDIRECT_URI"] = "https://open.spotify.com/"
 
-# Example: Get user's top tracks
-top_tracks = sp.current_user_top_tracks(limit=10)
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials())
 
-for idx, track in enumerate(top_tracks["items"]):
-    st.write(f"{idx+1}. {track['name']} by {track['artists'][0]['name']}")
+search = st.text_input("Enter a song to search:")
+
+if search:
+    results = sp.search(q=search, type="track", limit=5 )
+    tracks = results["tracks"]["items"]
+
+    if len(tracks) > 0:
+        for i, track in enumerate(tracks) :
+            st.write(f"**{i+1}. {track['name']}**")
+            st.write("Artist:", track["artists"][0]["name"])
+            st.write("Album:", track["album"]["name"])
+            st.image(track["album"]["images"][1]["url"], width=200)
+            st.markdown("---")
+    else:
+        st.write("No results found.")
