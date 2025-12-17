@@ -1,7 +1,6 @@
-# from reccobeats_api import get_reccobeats_features
-# from soundcharts_api import get_audio_features_from_soundcharts
+import time
+from genius_api import get_lyrics, get_lyrics_with_info
 from soundnet_api import get_audio_features_from_soundnet
-import librosa
 import numpy as np
 import requests
 import io
@@ -60,7 +59,7 @@ def show_song_page(track_id):
     st.subheader("YouTube Video")
     # Create a search query based on the song info
     search_query = f"{track['name']} {track['artists'][0]['name']}"
-    
+
     with st.spinner("Finding video on YouTube..."):
         try:
             # Search YouTube for 1 video
@@ -77,39 +76,67 @@ def show_song_page(track_id):
         except Exception as e:
             st.error(f"Error loading video")
 
-    # Add this to your app.py (in the song page section, around line 80-90)
-
      # ###################################       
     st.subheader("Audio Features (Soundnet)")
 
-    features = get_audio_features_from_soundnet(track_id)
+    # Try to get features with retry
+    max_retries = 2
+    features = None
+    
+    for attempt in range(max_retries + 1):
+        with st.spinner(f"Fetching audio features (attempt {attempt + 1}/{max_retries + 1})..."):
+            features = get_audio_features_from_soundnet(track_id)
+        
+        if features:
+            break
+        elif attempt < max_retries:
+            st.info(f"Attempt {attempt + 1} failed. Retrying...")
+            import time
+            time.sleep(1)  # Small delay before retry
 
     if not features:
-        st.write("Could not fetch audio features for this track.")
+        st.write("⚠️ Could not fetch audio features for this track.")
+        st.info("This might be because:")
+        st.write("- The track is not in Soundnet's database")
+        st.write("- The API is temporarily unavailable")
+        st.write("- There's a network connection issue")
+        st.write("")
+        st.write("You can still enjoy the song preview, YouTube video, and recommendations.")
     else:
-        st.write(f"**Key:** {features.get('key')}")
-        st.write(f"**Mode:** {features.get('mode')}")
-        st.write(f"**Tempo (BPM):** {features.get('tempo')}")
-        st.write(f"**Energy:** {features.get('energy')}")
-        st.write(f"**Danceability:** {features.get('danceability')}")
-        st.write(f"**Happiness:** {features.get('happiness')}")
-        st.write(f"**Acousticness:** {features.get('acousticness')}")
-        st.write(f"**Instrumentalness:** {features.get('instrumentalness')}")
-        st.write(f"**Liveness:** {features.get('liveness')}")
-        st.write(f"**Speechiness:** {features.get('speechiness')}")
-        st.write(f"**Loudness:** {features.get('loudness')}")
+        # Display the features
+        st.write(f"**Key:** {features.get('key', 'N/A')}")
+        st.write(f"**Mode:** {features.get('mode', 'N/A')}")
+        st.write(f"**Tempo (BPM):** {features.get('tempo', 'N/A')}")
+        st.write(f"**Energy:** {features.get('energy', 'N/A')}")
+        st.write(f"**Danceability:** {features.get('danceability', 'N/A')}")
+        st.write(f"**Happiness:** {features.get('happiness', 'N/A')}")
+        st.write(f"**Acousticness:** {features.get('acousticness', 'N/A')}")
+        st.write(f"**Instrumentalness:** {features.get('instrumentalness', 'N/A')}")
+        st.write(f"**Liveness:** {features.get('liveness', 'N/A')}")
+        st.write(f"**Speechiness:** {features.get('speechiness', 'N/A')}")
+        st.write(f"**Loudness:** {features.get('loudness', 'N/A')}")
      # ###################################
+        ##########################################
     st.subheader("Recommended Similar Songs")
-
     # Check if dataset exists
     dataset_path = "dataset.csv"
     if os.path.exists(dataset_path):
         try:
             # Import the recommender
             from recommender import get_recommendations_from_features
-        
-            # Get features from Soundnet (already fetched)
-            features = get_audio_features_from_soundnet(track_id)
+            
+            # Get features from Soundnet (with retry logic)
+            max_retries = 2
+            features = None
+            
+            for attempt in range(max_retries + 1):
+                with st.spinner(f"Fetching features for recommendations (attempt {attempt + 1}/{max_retries + 1})..."):
+                    features = get_audio_features_from_soundnet(track_id)
+                
+                if features:
+                    break
+                elif attempt < max_retries:
+                    time.sleep(1)  # Small delay before retry
         
             if features:
                 with st.spinner("Finding similar songs..."):
@@ -122,20 +149,33 @@ def show_song_page(track_id):
                 
                 if recommendations:
                     st.write("**Songs you might like:**")
-                    for rec in recommendations:
+                    for i, rec in enumerate(recommendations):
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.write(f"**{rec['track_name']}** — {rec['artists']}")
                             st.write(f"*Similarity: {rec['similarity_score']:.2f}*")
                         with col2:
-                            if st.button("View", key=f"view_{rec['track_id']}"):
+                            # Use index in key to ensure uniqueness
+                            if st.button("View", key=f"view_{i}_{rec['track_id']}"):
                                 st.query_params["track_id"] = rec['track_id']
                                 st.rerun()
                         st.markdown("---")
                 else:
                     st.write("No recommendations found.")
             else:
-                st.write("Could not get features for recommendations.")
+                st.warning("⚠️ Could not fetch audio features for recommendations.")
+                st.write("The recommender needs audio features to find similar songs.")
+                st.write("")
+                st.write("**Possible reasons:**")
+                st.write("- This track is not in Soundnet's database")
+                st.write("- The API service is temporarily unavailable")
+                st.write("- There's a network connection issue")
+                st.write("")
+                st.write("**You can try:**")
+                st.write("- Searching for a different song")
+                st.write("- Checking your internet connection")
+                st.write("- Trying again later")
+                
         except ImportError:
             st.warning("Recommender module not available.")
         except Exception as e:
