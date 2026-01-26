@@ -1,6 +1,7 @@
 import time
 from genius_api import get_lyrics, get_lyrics_with_info
 from soundnet_api import get_audio_features_from_soundnet
+from BERT_analysis import SentimentAnalyzer
 import numpy as np
 import requests
 import io
@@ -25,11 +26,21 @@ os.environ["SPOTIPY_REDIRECT_URI"] = "https://open.spotify.com/"
 
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials())
 
-# --- 1. Initialize Session State for Search ---
+# Initialize Session State for Search ---
 if "search_query" not in st.session_state:
     st.session_state.search_query = ""
 
-# --- 2. Song page ---
+@st.cache_resource
+def load_bert_analyzer():
+    with st.spinner("Loading AI Sentiment Model..."):
+        return SentimentAnalyzer()
+
+# initialise transformer model
+bert_analyzer = load_bert_analyzer()
+
+
+
+#Song page ---
 def show_song_page(track_id):
     # Add error handling in case ID is invalid
     try:
@@ -41,8 +52,15 @@ def show_song_page(track_id):
              st.rerun()
         st.stop()
 
+    # Simple Back Button
+    if st.button("Back to Search"):
+        st.query_params.clear()
+        st.rerun()
     st.header(track["name"])
     st.subheader(track["artists"][0]["name"])
+
+
+        
 
     if track["album"]["images"]:
         st.image(track["album"]["images"][0]["url"], width=300)
@@ -75,15 +93,69 @@ def show_song_page(track_id):
                 st.write("Could not find a video on YouTube.")
         except Exception as e:
             st.error(f"Error loading video")
+ # ###################################
+    st.subheader("Lyrics")
+    
+    # Create an expander so lyrics don't clutter the page immediately
+    with st.expander("Show Lyrics"):
+        with st.spinner("Fetching lyrics from Genius..."):
+            # Get track and artist names from the Spotify track object we already have
+            track_name = track['name']
+            artist_name = track['artists'][0]['name']
+            
+            # Call your function from genius_api.py
+            lyrics_data = get_lyrics_with_info(track_name, artist_name)
+            
+            if lyrics_data and lyrics_data.get('lyrics'):
+                # --- START BERT INTEGRATION ---
+                try:
+                    # 1. Analyze the lyrics
+                    sentiment_result = bert_analyzer.analyze(lyrics_data['lyrics'])
+                    
+                    # 2. Display the AI Result
+                    st.markdown("### 🤖 AI Sentiment Analysis")
+                    
+                    # Create columns for a nice layout
+                    col1, col2 = st.columns(2)
+                    
+                    # Color-code the result
+                    label = sentiment_result['label']
+                    stars = sentiment_result['stars']
+                    
+                    color = "green" if label == "Positive" else "red" if label == "Negative" else "gray"
+                    
+                    with col1:
+                        st.markdown(f"**Mood:** :{color}[{label}]")
+                    with col2:
+                        st.write(f"**Mood Rating:** {'⭐' * stars}")
+                    
+                    st.write("---") # Divider line
+                    
+                except Exception as e:
+                    st.error(f"AI Analysis Failed: {e}")
+                # --- END BERT INTEGRATION ---
+
+                # Display lyrics
+                st.text(lyrics_data['lyrics'])
+               
+                
+                # specific formatting for the footer
+                st.markdown("---")
+                if lyrics_data.get('album'):
+                    st.caption(f"Album: {lyrics_data['album']}")
+                st.caption(f"Source: [Genius]({lyrics_data.get('url', '#')})")
+            else:
+                st.info("Lyrics could not be found for this song.")
+    # --- End of Lyrics Section ---
 
      # ###################################       
     st.subheader("Audio Features (Soundnet)")
 
     # Try to get features with retry
-    max_retries = 2
+    max_retries = 1
     features = None
     
-    for attempt in range(max_retries + 1):
+    for attempt in range(max_retries):
         with st.spinner(f"Fetching audio features (attempt {attempt + 1}/{max_retries + 1})..."):
             features = get_audio_features_from_soundnet(track_id)
         
