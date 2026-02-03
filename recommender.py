@@ -359,17 +359,6 @@ def get_recommendations(
     dataset_path: str = "dataset.csv",
     k: int = 5
 ) -> List[Dict]:
-    """
-    Get recommendations by fetching features from Soundnet API.
-    
-    Args:
-        track_id: Spotify track ID
-        dataset_path: Path to dataset CSV
-        k: Number of recommendations
-        
-    Returns:
-        List of recommended tracks
-    """
     # Get features from Soundnet
     features = get_audio_features_from_soundnet(track_id)
     
