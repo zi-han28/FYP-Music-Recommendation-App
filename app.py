@@ -38,6 +38,8 @@ if "hybrid_recs_cache" not in st.session_state:
     st.session_state.hybrid_recs_cache = None
 if "hybrid_recs_fav_hash" not in st.session_state:
     st.session_state.hybrid_recs_fav_hash = None
+if "use_sentiment_features" not in st.session_state:
+    st.session_state.use_sentiment_features = True
 
 # --- LOGIN FUNCTIONS ---
 def login_page():
@@ -335,14 +337,47 @@ def display_recommendations_section(track_id, track, features):
     artist_name = track['artists'][0]['name']
     cache_key = f"{track_name}|{artist_name}"
 
-    modified_features = features.copy() if features else {}
+    # Check if sentiment is available
+    has_sentiment = cache_key in st.session_state.sentiment_cache
 
-    if cache_key in st.session_state.sentiment_cache:
+    if has_sentiment:
         sentiment_result = st.session_state.sentiment_cache[cache_key]
-        sentiment_score = sentiment_result['score']/2.0
+        sentiment_score = sentiment_result['score'] / 2.0
+    
+        st.caption("Choose which audio features to use for recommendations:")
+        with st.container(border=True):
+            col_sent, col_orig = st.columns(2)
+            with col_sent:
+                if st.button(
+                    "Sentimental Value",
+                    key="btn_sentiment",
+                    type="primary" if st.session_state.use_sentiment_features else "secondary",
+                    use_container_width=True
+                ):
+                    st.session_state.use_sentiment_features = True
+                    st.session_state.recommendations = None
+                    st.rerun()
+            with col_orig:
+                if st.button(
+                    "Original Features",
+                    key="btn_original",
+                    type="primary" if not st.session_state.use_sentiment_features else "secondary",
+                    use_container_width=True
+                ):
+                    st.session_state.use_sentiment_features = False
+                    st.session_state.recommendations = None
+                    st.rerun()
 
-        modified_features['valence'] = sentiment_score
-        st.info(f"Using sentimental value from BERT: {sentiment_score:.3f}")
+        # Build features based on selection
+        if st.session_state.use_sentiment_features:
+            modified_features = features.copy() if features else {}
+            modified_features['valence'] = sentiment_score
+            st.info(f"Using BERT sentimental valence: {sentiment_score:.3f}")
+        else:
+            modified_features = features.copy() if features else {}
+            st.info(f"Using original valence: {modified_features.get('valence', 'N/A')}")
+    else:
+        modified_features = features.copy() if features else {}
     
     # Button to trigger recommendations
     if st.button("Get Similar Songs", type="primary", key="get_recommendations"):
