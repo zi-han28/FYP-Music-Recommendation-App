@@ -4,7 +4,8 @@ import streamlit.components.v1 as components
 import spotipy
 import os
 from spotipy.oauth2 import SpotifyClientCredentials
-from reccobeats import get_audio_features_with_fallback, get_recommendations_from_features  # Use your new Spotify helper
+from hybrid import get_audio_features_with_fallback, get_recommendations_from_features, get_hybrid_recommendations_for_user, CollaborativeFilteringEngine
+from auth import get_user_favourites, add_to_favourites, remove_from_favourites, is_favourite
 from dotenv import load_dotenv
 from youtubesearchpython import VideosSearch
 
@@ -28,6 +29,14 @@ if "recommendations" not in st.session_state:
     st.session_state.recommendations = None
 if "current_track_for_rec" not in st.session_state:
     st.session_state.current_track_for_rec = None
+if "lyrics_cache" not in st.session_state:
+    st.session_state.lyrics_cache = {}
+if "sentiment_cache" not in st.session_state:
+    st.session_state.sentiment_cache = {}
+if "hybrid_recs_cache" not in st.session_state:
+    st.session_state.hybrid_recs_cache = None
+if "hybrid_recs_fav_hash" not in st.session_state:
+    st.session_state.hybrid_recs_fav_hash = None
 
 # --- LOGIN FUNCTIONS ---
 def login_page():
@@ -66,19 +75,21 @@ def logout():
     st.session_state.username = None
     st.session_state.recommendations = None
     st.session_state.current_track_for_rec = None
+    st.session_state.lyrics_cache = {}
+    st.session_state.sentiment_cache = {}
+    st.session_state.hybrid_recs_cache = None
+    st.session_state.hybrid_recs_fav_hash = None
     st.rerun()
+
+def _invalidate_hybrid_cache():
+    """Invalidate the hybrid recommendations cache (call when favourites change)."""
+    st.session_state.hybrid_recs_cache = None
+    st.session_state.hybrid_recs_fav_hash = None
 
 # --- CHECK LOGIN STATUS ---
 if not st.session_state.logged_in:
     login_page()
     st.stop()
-
-# --- SIDEBAR ---
-with st.sidebar:
-    st.write(f"Logged in as: **{st.session_state.username}**")
-    if st.button("Logout"):
-        logout()
-    st.divider()
 
 # --- SPOTIFY SETUP ---
 client_id = os.getenv("SPOTIPY_CLIENT_ID")
@@ -100,15 +111,174 @@ def load_bert_analyzer():
 
 bert_analyzer = load_bert_analyzer()
 
-# --- RECOMMENDATION DISPLAY FUNCTION ---
+# --- FAVOURITES---
+def display_favourites_in_sidebar():
+    """Display user's favourite songs in the sidebar."""
+    with st.sidebar:
+        st.divider()
+        st.subheader("❤️ Your Favourites")
+        
+        favourites = get_user_favourites(st.session_state.username)
+        
+        if not favourites:
+            st.caption("No favourites yet. Click the heart on any song to add!")
+        else:
+            for i, track in enumerate(favourites[-10:]):  # Show last 10 favourites
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    if st.button(f"🎵 {track['track_name'][:20]}...", 
+                                key=f"fav_{i}_{track['track_id']}",
+                                use_container_width=True):
+                        st.query_params["track_id"] = track['track_id']
+                        st.session_state.recommendations = None
+                        st.session_state.current_track_for_rec = None
+                        st.rerun()
+                with col2:
+                    if st.button("❌", key=f"remove_fav_{i}_{track['track_id']}"):
+                        success, msg = remove_from_favourites(
+                            st.session_state.username, 
+                            track['track_id']
+                        )
+                        if success:
+                            st.success(msg)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            
+            if len(favourites) > 10:
+                st.caption(f"...and {len(favourites) - 10} more")
+
+def handle_favourite_button(track_id, track_name, artist_name, album_name, album_image):
+    """Handle favourite button click."""
+    is_fav = is_favourite(st.session_state.username, track_id)
+    
+    col_heart, col_status = st.columns([1, 10])
+    
+    with col_heart:
+        button_label = "❤️" if is_fav else "🩶"
+        clicked = st.button(button_label, key=f"favourite_{track_id}", help="Add to favourites")
+    
+    with col_status:
+        if is_fav:
+            st.caption("In your favourites")
+    
+    # Handle click OUTSIDE columns so messages render full-width
+    if clicked:
+        if is_fav:
+            success, msg = remove_from_favourites(st.session_state.username, track_id)
+        else:
+            track_data = {
+                'track_id': track_id,
+                'track_name': track_name,
+                'artist_name': artist_name,
+                'album_name': album_name,
+                'album_image': album_image,
+                'added_at': time.time()
+            }
+            success, msg = add_to_favourites(st.session_state.username, track_data)
+        
+        if success:
+            _invalidate_hybrid_cache()
+            st.success(msg)
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error(msg)
+
+# --- SIDEBAR ---
+with st.sidebar:
+    st.write(f"Logged in as: **{st.session_state.username}**")
+    if st.button("Logout"):
+        logout()
+    st.divider()
+
+    display_favourites_in_sidebar()
+
+# --- LYRICS---
+def get_cached_lyrics(track_name, artist_name):
+    """Get lyrics from cache or fetch if not cached."""
+    cache_key = f"{track_name}|{artist_name}"
+    
+    if cache_key in st.session_state.lyrics_cache:
+        return st.session_state.lyrics_cache[cache_key]
+    
+    # Fetch and cache
+    with st.spinner("Fetching lyrics..."):
+        lyrics_data = get_lyrics_with_info(track_name, artist_name)
+        st.session_state.lyrics_cache[cache_key] = lyrics_data
+        return lyrics_data
+
+def get_cached_sentiment(lyrics_text, track_name, artist_name):
+    """Get sentiment from cache or analyze if not cached."""
+    cache_key = f"{track_name}|{artist_name}"
+    
+    if cache_key in st.session_state.sentiment_cache:
+        return st.session_state.sentiment_cache[cache_key]
+    
+    # Analyze and cache
+    try:
+        sentiment_result = bert_analyzer.analyze(lyrics_text)
+        st.session_state.sentiment_cache[cache_key] = sentiment_result
+        return sentiment_result
+    except Exception as e:
+        st.error(f"Analysis failed: {e}")
+        return None
+
+def display_lyrics_section(track_name, artist_name):
+    """Display lyrics and sentiment analysis section."""
+    st.write("---")
+    st.subheader("Lyrics Analysis")
+    
+    # Get cached lyrics
+    lyrics_data = get_cached_lyrics(track_name, artist_name)
+    
+    if lyrics_data and lyrics_data.get('lyrics'):
+        # Get cached sentiment
+        sentiment_result = get_cached_sentiment(lyrics_data['lyrics'], track_name, artist_name)
+        
+        if sentiment_result:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                label = sentiment_result['label']
+                color_str = "green" if "Positive" in label else "red" if "Negative" in label else "gray"
+                st.markdown(f"**Mood:** :{color_str}[{label}]")
+                
+            with col2:
+                st.metric("Sentiment Score", f"{sentiment_result['score']}/2.0")
+                st.caption(f"Confidence: {int(sentiment_result['confidence'] * 100)}%")
+        
+        # Lyrics expander
+        with st.expander("Show Full Lyrics"):
+            st.text(lyrics_data['lyrics'])
+            st.markdown("---")
+            
+            # Add refresh button for lyrics (optional)
+            if st.button("Refresh Lyrics", key="refresh_lyrics"):
+                # Clear from cache to force refresh
+                cache_key = f"{track_name}|{artist_name}"
+                if cache_key in st.session_state.lyrics_cache:
+                    del st.session_state.lyrics_cache[cache_key]
+                if cache_key in st.session_state.sentiment_cache:
+                    del st.session_state.sentiment_cache[cache_key]
+                st.rerun()
+    else:
+        st.info("Lyrics not found for this track.")
+        # Add retry button
+        if st.button("Retry Lyrics Search", key="retry_lyrics"):
+            cache_key = f"{track_name}|{artist_name}"
+            if cache_key in st.session_state.lyrics_cache:
+                del st.session_state.lyrics_cache[cache_key]
+            st.rerun()
+
+# --- RECOMMENDATION DISPLAY---
 def display_recommendations(recommendations, current_track_name):
     if not recommendations:
         st.warning("No recommendations available.")
         return
     
     st.subheader(f"🎧 Recommended Songs (Similar to {current_track_name})")
-    
-
     
     for i, rec in enumerate(recommendations):
             
@@ -155,6 +325,50 @@ def display_recommendations(recommendations, current_track_name):
                         st.session_state.current_track_for_rec = None
                         st.rerun()
 
+def display_recommendations_section(track_id, track, features):
+    track_name = track['name']
+    artist_name = track['artists'][0]['name']
+    cache_key = f"{track_name}|{artist_name}"
+
+    modified_features = features.copy() if features else {}
+
+    if cache_key in st.session_state.sentiment_cache:
+        sentiment_result = st.session_state.sentiment_cache[cache_key]
+        sentiment_score = sentiment_result['score']/2.0
+
+        modified_features['valence'] = sentiment_score
+        st.info(f"Using sentimental value from BERT: {sentiment_score:.3f}")
+    
+    # Button to trigger recommendations
+    if st.button("Get Similar Songs", type="primary", key="get_recommendations"):
+        with st.spinner("Finding similar songs..."):
+            try:
+                recommendations = get_recommendations_from_features(
+                    features_dict=modified_features,
+                    track_id=track_id,
+                    k=6
+                )
+                
+                if recommendations:
+                    st.session_state.recommendations = recommendations
+                    st.success(f"Found {len(recommendations)} recommendations!")
+                    st.rerun()
+                else:
+                    st.error("Could not generate recommendations. Please try again.")
+                    
+            except Exception as e:
+                st.error(f"Error generating recommendations: {e}")
+    
+    # Display recommendations if they exist
+    if st.session_state.recommendations:
+        display_recommendations(st.session_state.recommendations, track["name"])
+    
+    # Clear recommendations button (only shows when recommendations exist)
+    if st.session_state.recommendations:
+        if st.button("Clear Recommendations", key="clear_recommendations"):
+            st.session_state.recommendations = None
+            st.rerun()
+
 # --- SONG PAGE LOGIC ---
 def show_song_page(track_id):
     # Clear previous recommendations when viewing a new track
@@ -180,8 +394,19 @@ def show_song_page(track_id):
         st.rerun()
 
     # Display Header & Album Art
-    st.header(track["name"])
-    st.subheader(track["artists"][0]["name"])
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.header(track["name"])
+        st.subheader(track["artists"][0]["name"])
+
+    # Add favourite button near the header
+    album_image = track["album"]["images"][0]["url"] if track["album"]["images"] else None
+    handle_favourite_button(
+        track_id=track_id,
+        track_name=track["name"],
+        artist_name=track["artists"][0]["name"],
+        album_name=track["album"]["name"],
+        album_image=album_image)
 
     if track["album"]["images"]:
         st.image(track["album"]["images"][0]["url"], width=300)
@@ -258,41 +483,17 @@ def show_song_page(track_id):
             st.json(features)
     else:
         st.warning("Audio features not available for this track via Reccobeats")
+
+    # --- LYRICS & SENTIMENT SECTION ---
+    track_name = track['name']
+    artist_name = track['artists'][0]['name']
+    display_lyrics_section(track_name, artist_name)
         
-    # --- RECOMMENDATIONS SECTION ---
+    # --- CBF RECOMMENDATIONS SECTION ---
     st.write("---")
     st.subheader("🎯 Get Recommendations")
+    display_recommendations_section(track_id, track, features)
     
-    # Button to trigger recommendations
-    if st.button("Get Similar Songs", type="primary", key="get_recommendations"):
-        with st.spinner("Finding similar songs..."):
-            try:
-                recommendations = get_recommendations_from_features(
-                    features_dict=features if features else {},
-                    track_id=track_id,
-                    k=6  # Get 6 recommendations
-                )
-                
-                if recommendations:
-                    st.session_state.recommendations = recommendations
-                    st.success(f"Found {len(recommendations)} recommendations!")
-                    st.rerun()
-                else:
-                    st.error("Could not generate recommendations. Please try again.")
-                    
-            except Exception as e:
-                st.error(f"Error generating recommendations: {e}")
-    
-    # Display recommendations if they exist
-    if st.session_state.recommendations:
-        display_recommendations(st.session_state.recommendations, track["name"])
-    
-    # Clear recommendations button
-    if st.session_state.recommendations:
-        if st.button("Clear Recommendations", key="clear_recommendations"):
-            st.session_state.recommendations = None
-            st.rerun()
-
 # --- SEARCH PAGE LOGIC ---
 if "track_id" in st.query_params:
     show_song_page(st.query_params["track_id"])
@@ -306,40 +507,190 @@ if "track_id" in st.query_params:
 
 # --- MAIN SEARCH PAGE ---
 st.title("My Music App")
+tab_search, tab_fyp = st.tabs(["🔍 Search", "🎯 For You"])
 
-def update_search_state():
-    st.session_state.search_query = st.session_state.search_input
 
-search = st.text_input(
-    "Search a song:", 
-    key="search_input", 
-    value=st.session_state.search_query,
-    on_change=update_search_state
-)
+# =============================================================================
+# SEARCH TAB
+with tab_search:
+    def update_search_state():
+        st.session_state.search_query = st.session_state.search_input
 
-if search:
-    st.session_state.search_query = search
-    try:
-        results = sp.search(q=search, type="track", limit=5)
-        tracks = results["tracks"]["items"]
+    search = st.text_input(
+        "Search a song:", 
+        key="search_input", 
+        value=st.session_state.search_query,
+        on_change=update_search_state
+    )
 
-        if len(tracks) > 0:
-            for i, track in enumerate(tracks):
-                st.write(f"### {i+1}. {track['name']}")
-                st.write(f"**Artist:** {track['artists'][0]['name']}")
-                st.write(f"**Album:** {track['album']['name']}")
-                
-                if track["album"]["images"]:
-                    st.image(track["album"]["images"][1]["url"], width=200)
+    if search:
+        st.session_state.search_query = search
+        try:
+            results = sp.search(q=search, type="track", limit=5)
+            tracks = results["tracks"]["items"]
 
-                if st.button(f"Select Song", key=track["id"]):
-                    st.query_params["track_id"] = track["id"]
-                    st.session_state.recommendations = None
-                    st.session_state.current_track_for_rec = None
-                    st.rerun()
+            if len(tracks) > 0:
+                for i, track in enumerate(tracks):
+                    st.write(f"### {i+1}. {track['name']}")
+                    st.write(f"**Artist:** {track['artists'][0]['name']}")
+                    st.write(f"**Album:** {track['album']['name']}")
+                    
+                    if track["album"]["images"]:
+                        st.image(track["album"]["images"][1]["url"], width=200)
 
-                st.markdown("---")
+                    if st.button(f"Select Song", key=track["id"]):
+                        st.query_params["track_id"] = track["id"]
+                        st.session_state.recommendations = None
+                        st.session_state.current_track_for_rec = None
+                        st.rerun()
+
+                    st.markdown("---")
+            else:
+                st.write("No results found.")
+        except Exception as e:
+            st.error(f"Search failed: {e}")
+# =============================================================================
+# FYP TAB
+with tab_fyp:
+    favourites = get_user_favourites(st.session_state.username)
+    
+    # Hash of favourites to detect changes → invalidate cache
+    fav_hash = hash(tuple(sorted(f.get('track_id', '') for f in favourites))) if favourites else None
+    
+    cache_valid = (
+        st.session_state.hybrid_recs_cache is not None
+        and st.session_state.hybrid_recs_fav_hash == fav_hash
+    )
+    
+    if not favourites:
+        # --- Cold start: show popular tracks from charts ---
+        st.subheader("🔥 Popular Tracks")
+        st.caption("Add songs to your favourites to get personalised recommendations!")
+        
+        cf_engine = CollaborativeFilteringEngine("final_charts_updated.csv")
+        popular = cf_engine.get_popular_tracks(k=6)
+        
+        if popular:
+            for i, rec in enumerate(popular):
+                with st.container():
+                    st.write(f"**{i+1}. {rec['track_name']}**")
+                    st.write(f"*{rec['artists']}*")
+                    
+                    try:
+                        track_info = sp.track(rec['track_id'])
+                        if track_info["album"]["images"]:
+                            st.image(track_info["album"]["images"][1]["url"], width=150)
+                        if st.button("View", key=f"pop_{i}_{rec['track_id']}"):
+                            st.query_params["track_id"] = rec['track_id']
+                            st.session_state.recommendations = None
+                            st.session_state.current_track_for_rec = None
+                            st.rerun()
+                    except Exception:
+                        st.caption(f"Spotify ID: {rec['track_id']}")
+                    
+                    st.divider()
         else:
-            st.write("No results found.")
-    except Exception as e:
-        st.error(f"Search failed: {e}")
+            st.info("Charts data not available.")
+    
+    else:
+        # --- Personalised hybrid recommendations ---
+        st.subheader("🎯 Recommended For You")
+        
+        col_info, col_refresh = st.columns([4, 1])
+        with col_refresh:
+            if st.button("🔄 Refresh", key="refresh_hybrid"):
+                cache_valid = False
+        
+        if cache_valid:
+            hybrid_recs, alpha, debug_info = st.session_state.hybrid_recs_cache
+        else:
+            with st.spinner("Building your personalised recommendations..."):
+                hybrid_recs, alpha, debug_info = get_hybrid_recommendations_for_user(
+                    favourites,
+                    charts_csv_path="final_charts.csv",
+                    k=6
+                )
+                st.session_state.hybrid_recs_cache = (hybrid_recs, alpha, debug_info)
+                st.session_state.hybrid_recs_fav_hash = fav_hash
+        
+        # Info line
+        with col_info:
+            mode_label = debug_info.get('mode', 'unknown')
+            in_charts = debug_info.get('in_charts', 0)
+            total_fav = debug_info.get('total_favourites', 0)
+            
+            if mode_label == 'cbf_only':
+                st.caption(f"Based on your {total_fav} favourite(s) • Content-based")
+            elif mode_label == 'hybrid':
+                st.caption(
+                    f"Based on your {total_fav} favourite(s) • "
+                    f"Hybrid (α={alpha:.2f}, {in_charts} in charts)"
+                )
+            else:
+                st.caption("Popular tracks")
+        
+        # Debug expander
+        with st.expander("ℹ️ How this works"):
+            st.write(f"**Dynamic Alpha:** {alpha:.3f}")
+            st.write(f"**Favourites in charts:** {debug_info.get('in_charts', 0)} / {debug_info.get('total_favourites', 0)}")
+            st.write(f"**Mode:** {debug_info.get('mode', 'N/A')}")
+            st.write(f"**CF recommendations:** {debug_info.get('cf_count', 0)}")
+            st.write(f"**CBF recommendations:** {debug_info.get('cbf_count', 0)}")
+            st.caption(
+                "When more of your favourites are in the charts dataset, "
+                "the system uses collaborative filtering (CF) more heavily. "
+                "Otherwise it relies on content-based filtering (CBF) using audio features."
+            )
+        
+        # Display recommendations
+        if hybrid_recs:
+            for i, rec in enumerate(hybrid_recs):
+                with st.container():
+                    source_tag = ""
+                    if rec.get('source') == 'cf':
+                        source_tag = "📊 Charts-based"
+                    elif rec.get('source') == 'cbf':
+                        source_tag = "🎵 Audio-based"
+                    elif rec.get('source') == 'popular':
+                        source_tag = "🔥 Popular"
+                    
+                    try:
+                        track_info = sp.track(rec['track_id'])
+                        
+                        col_img, col_info_card = st.columns([1, 3])
+                        with col_img:
+                            if track_info["album"]["images"]:
+                                st.image(track_info["album"]["images"][1]["url"], width=150)
+                        
+                        with col_info_card:
+                            st.write(f"**{rec['track_name']}**")
+                            st.write(f"*{rec['artists']}*")
+                            if source_tag:
+                                st.caption(source_tag)
+                            
+                            similarity_percent = rec['similarity_score'] * 100
+                            st.progress(
+                                min(rec['similarity_score'], 1.0),
+                                text=f"Match: {similarity_percent:.1f}%"
+                            )
+                            
+                            if st.button("View", key=f"fy_{i}_{rec['track_id']}"):
+                                st.query_params["track_id"] = rec['track_id']
+                                st.session_state.recommendations = None
+                                st.session_state.current_track_for_rec = None
+                                st.rerun()
+                    
+                    except Exception:
+                        st.write(f"**{rec['track_name']}**")
+                        st.write(f"*{rec['artists']}*")
+                        if source_tag:
+                            st.caption(source_tag)
+                        if st.button("View", key=f"fy_{i}_{rec['track_id']}_fb"):
+                            st.query_params["track_id"] = rec['track_id']
+                            st.session_state.recommendations = None
+                            st.session_state.current_track_for_rec = None
+                            st.rerun()
+                    
+                    st.divider()
+        # else:
+        #     st.info("Could not generate recommendations. Try adding more songs to your favourites!")
