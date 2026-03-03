@@ -7,7 +7,8 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from hybrid import get_audio_features_with_fallback, get_recommendations_from_features, get_hybrid_recommendations_for_user, CollaborativeFilteringEngine
 from auth import get_user_favourites, add_to_favourites, remove_from_favourites, is_favourite
 from dotenv import load_dotenv
-from youtubesearchpython import VideosSearch
+import yt_dlp
+
 
 # Import your custom modules
 from genius_api import get_lyrics_with_info
@@ -124,27 +125,31 @@ def display_favourites_in_sidebar():
             st.caption("No favourites yet. Click the heart on any song to add!")
         else:
             for i, track in enumerate(favourites[-10:]):  # Show last 10 favourites
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    if st.button(f"🎵 {track['track_name'][:20]}...", 
-                                key=f"fav_{i}_{track['track_id']}",
-                                use_container_width=True):
-                        st.query_params["track_id"] = track['track_id']
-                        st.session_state.recommendations = None
-                        st.session_state.current_track_for_rec = None
-                        st.rerun()
-                with col2:
-                    if st.button("❌", key=f"remove_fav_{i}_{track['track_id']}"):
-                        success, msg = remove_from_favourites(
-                            st.session_state.username, 
-                            track['track_id']
-                        )
-                        if success:
-                            st.success(msg)
-                            time.sleep(1)
+                with st.container():
+                    col1, col2 = st.columns([3, 1.5])
+                    with col1:
+                        if st.button(f"🎵 {track['track_name'][:20]}...", 
+                                    key=f"fav_{i}_{track['track_id']}",
+                                    use_container_width=True):
+                            st.query_params["track_id"] = track['track_id']
+                            st.session_state.recommendations = None
+                            st.session_state.current_track_for_rec = None
                             st.rerun()
-                        else:
-                            st.error(msg)
+                    with col2:
+                        remove_button = st.button("❌", key=f"remove_fav_{i}_{track['track_id']}")
+
+                if remove_button:
+                    success, msg = remove_from_favourites(
+                        st.session_state.username, 
+                        track['track_id']
+                    )
+                    if success:
+                        st.success(msg)
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                    
             
             if len(favourites) > 10:
                 st.caption(f"...and {len(favourites) - 10} more")
@@ -420,22 +425,23 @@ def show_song_page(track_id):
     st.write(f"**Release Date:** {track['album']['release_date']}")
     st.markdown(f"[Open in Spotify]({track['external_urls']['spotify']})")
 
-    # YouTube Section
+    # YOUTUBE SECTION
     st.subheader("YouTube Video")
     search_query = f"{track['name']} {track['artists'][0]['name']}"
     with st.spinner("Finding video on YouTube..."):
         try:
-            videosSearch = VideosSearch(search_query, limit=1)
-            results = videosSearch.result()
-            if results['result']:
-                video_url = results['result'][0]['link']
-                st.video(video_url)
-            else:
-                st.write("Could not find a video on YouTube.")
+            ydl_opts = {'quiet': True, 'no_warnings': True, 'default_search': 'ytsearch1'}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"ytsearch1:{search_query}", download=False)
+                if info and 'entries' in info and info['entries']:
+                    video_url = info['entries'][0]['webpage_url']
+                    st.video(video_url)
+                else:
+                    st.write("Could not find a video on YouTube.")
         except Exception:
             st.warning("Could not load YouTube video.")
 
-    # --- AUDIO FEATURES SECTION ---
+    # AUDIO FEATURES SECTION
     st.subheader("🎵 Audio Features Analysis")
     
     with st.spinner("Analyzing audio features via Reccobeats..."):
@@ -607,7 +613,7 @@ with tab_fyp:
             with st.spinner("Building your personalised recommendations..."):
                 hybrid_recs, alpha, debug_info = get_hybrid_recommendations_for_user(
                     favourites,
-                    charts_csv_path="final_charts.csv",
+                    charts_csv_path="final_charts_updated.csv",
                     k=6
                 )
                 st.session_state.hybrid_recs_cache = (hybrid_recs, alpha, debug_info)
