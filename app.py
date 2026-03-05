@@ -1,4 +1,6 @@
 import time
+import pandas as pd
+import random
 import streamlit as st
 import streamlit.components.v1 as components
 import spotipy
@@ -8,9 +10,6 @@ from hybrid import get_audio_features_with_fallback, get_recommendations_from_fe
 from auth import get_user_favourites, add_to_favourites, remove_from_favourites, is_favourite
 from dotenv import load_dotenv
 import yt_dlp
-
-
-# Import your custom modules
 from genius_api import get_lyrics_with_info
 from BERT_analysis import SentimentAnalyzer
 from auth import init_db, create_user, authenticate_user
@@ -40,6 +39,10 @@ if "hybrid_recs_fav_hash" not in st.session_state:
     st.session_state.hybrid_recs_fav_hash = None
 if "use_sentiment_features" not in st.session_state:
     st.session_state.use_sentiment_features = True
+if "customise_recs" not in st.session_state:
+    st.session_state.customise_recs = None
+if "customise_seed_id" not in st.session_state:
+    st.session_state.customise_seed_id = None
 
 # --- LOGIN FUNCTIONS ---
 def login_page():
@@ -520,8 +523,25 @@ def show_song_page(track_id):
                 st.caption(live_desc)
         
         # Raw data expander for debugging
-        with st.expander("📊 View Raw Audio Features Data"):
-            st.json(features)
+        with st.expander("📊 Audio features Info"):
+            st.subheader("Danceability")
+            st.text(""" Danceability is a measure of how suitable a song is for dancing, ranging from 0 to 1. A score of 0 means the song is not danceable at all, while a score of 1 indicates it is highly danceable. This score takes into account factors like tempo, rhythm, beat consistency, and energy, with higher scores indicating stronger, more rhythmically engaging tracks. """)
+            st.subheader("Energy")
+            st.text(""" Energy in music refers to the intensity and liveliness of a track, with a range from 0 to 1. A score of 0 indicates a very calm, relaxed, or low-energy song, while a score of 1 represents a high-energy, intense track. It’s influenced by elements like tempo, loudness, and the overall drive or excitement in the music.""")
+            st.subheader("Valence")
+            st.text(""" Valence in music measures the emotional tone or mood of a track, with a range from 0 to 1. A score of 0 indicates a song with a more negative, sad, or dark feeling, while a score of 1 represents a more positive, happy, or uplifting mood. Tracks with a high valence tend to feel joyful or energetic, while those with a low valence may evoke feelings of melancholy or sadness. """)
+            st.subheader("Tempo")
+            st.text(""" Estimated tempo in beats per minute (BPM). Typically ranges between 0 and 250. """)
+            st.subheader("Loudness")
+            st.text(""" The overall loudness of a track in decibels (dB). Loudness values are averaged across the entire track and are useful for comparing relative loudness of tracks. Loudness is the quality of a sound that is the primary psychological correlate of physical strength (amplitude). Values typical range between -60 and 0 db. """)
+            st.subheader("Acousticness")
+            st.text("""Acousticness refers to how much of a song or piece of music is made up of natural, organic sounds rather than synthetic or electronic elements. In other words, it's a measure of how "acoustic" a piece of music sounds. A confidence measure from 0.0 to 1.0, greater value represents higher confidence the track is acoustic.""")
+            st.subheader("Insturmentalness")
+            st.text(""" Predicts whether a track contains no vocals. “Ooh” and “aah” sounds are treated as instrumental in this context. Rap or spoken word tracks are clearly “vocal”. The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content. Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0. """)
+            st.subheader("Speechiness")
+            st.text(""" Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks. """)
+            st.subheader("Liveness")
+            st.text(""" Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides strong likelihood that the track is live. """)
     else:
         st.warning("Audio features not available for this track via Reccobeats")
 
@@ -548,7 +568,7 @@ if "track_id" in st.query_params:
 
 # --- MAIN SEARCH PAGE ---
 st.title("My Music App")
-tab_search, tab_fyp = st.tabs(["🔍 Search", "🎯 For You"])
+tab_search, tab_fyp, tab_customise = st.tabs(["🔍 Search", "💿 For You", "🎚Customise"])
 
 
 # =============================================================================
@@ -677,11 +697,7 @@ with tab_fyp:
             st.write(f"**Mode:** {debug_info.get('mode', 'N/A')}")
             st.write(f"**CF recommendations:** {debug_info.get('cf_count', 0)}")
             st.write(f"**CBF recommendations:** {debug_info.get('cbf_count', 0)}")
-            st.caption(
-                "When more of your favourites are in the charts dataset, "
-                "the system uses collaborative filtering (CF) more heavily. "
-                "Otherwise it relies on content-based filtering (CBF) using audio features."
-            )
+            st.caption("This hybrid recommendation uses the tracks that you have favourited, extract and analyse the track's aggregate audio features and return algorithmically similar songs that might suit you taste. It is netiher using you personal information nor your spotify account to achieve this output.")
         
         # Display recommendations
         if hybrid_recs:
@@ -733,5 +749,161 @@ with tab_fyp:
                             st.rerun()
                     
                     st.divider()
-        # else:
-        #     st.info("Could not generate recommendations. Try adding more songs to your favourites!")
+
+# =============================================================================
+# CUSTOMISE TAB
+# =============================================================================
+with tab_customise:
+    st.subheader("🎚 Customise Recommendations")
+    st.caption("Adjust audio feature sliders to discover songs matching your exact vibe.")
+    
+    # --- Pick a random seed track from charts ---
+    @st.cache_data
+    def load_chart_seeds():
+        """Load first 5000 rows of charts CSV for random seeding."""
+        try:
+            df = pd.read_csv("final_charts_updated.csv")
+            df = df.head(5000)
+            df = df.dropna(subset=['spotify_id'])
+            return df[['title', 'artist', 'spotify_id']].to_dict('records')
+        except Exception:
+            return []
+    
+    chart_seeds = load_chart_seeds()
+    
+
+    if st.session_state.customise_seed_id is None:
+        seed = random.choice(chart_seeds)
+        st.session_state.customise_seed_id = seed['spotify_id']
+    
+    if st.button("🔀 New Seed", key="reroll_seed"):
+        seed = random.choice(chart_seeds)
+        st.session_state.customise_seed_id = seed['spotify_id']
+        st.session_state.customise_recs = None
+        st.rerun()
+    
+    # --- Feature weight sliders in a container ---
+    with st.container(border=True):
+        st.write("**Adjust Audio Features**")
+        st.caption("Set each feature value (0.0 – 1.0). These become the target profile for recommendations.")
+        
+        slider_config = {
+            'danceability':     {'label': 'Danceability', 'default': 0.5, 'help': 'Danceability is a measure of how suitable a song is for dancing, ranging from 0 to 1. A score of 0 means the song is not danceable at all, while a score of 1 indicates it is highly danceable. This score takes into account factors like tempo, rhythm, beat consistency, and energy, with higher scores indicating stronger, more rhythmically engaging tracks.'},
+            'energy':           {'label': 'Energy', 'default': 0.5, 'help': 'Energy is the intensity and liveliness of music, with a range from 0 to 1. A score of 0 indicates a very calm, relaxed, or low-energy song, while a score of 1 represents a high-energy, intense track. It’s influenced by elements like tempo, loudness, and the overall drive or excitement in the music.'},
+            'valence':          {'label': 'Valence', 'default': 0.5, 'help': 'Valence in music refers to the emotional tone or mood of a track, with a range from 0 to 1. A score of 0 indicates a song with a more negative, sad, or dark feeling, while a score of 1 represents a more positive, happy, or uplifting mood. Tracks with a high valence tend to feel joyful or energetic, while those with a low valence may evoke feelings of melancholy or sadness.'},
+            'acousticness':     {'label': 'Acousticness', 'default': 0.5, 'help': 'Acousticness refers to how much of a song or piece of music is made up of natural, organic sounds rather than synthetic or electronic elements. A confidence measure from 0.0 to 1.0, greater value represents higher confidence the track is acoustic.'},
+            'instrumentalness': {'label': 'Instrumentalness', 'default': 0.5, 'help': 'Predicts whether a track contains no vocals. “Ooh” and “aah” sounds are treated as instrumental in this context. Rap or spoken word tracks are clearly “vocal”. The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content. Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0.'},
+            'liveness':         {'label': 'Liveness', 'default': 0.5, 'help': 'Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides strong likelihood that the track is live.'},
+            'speechiness':      {'label': 'Speechiness', 'default': 0.5, 'help': 'Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.'},
+        }
+        
+        custom_features = {}
+        
+        col_left, col_right = st.columns(2)
+        slider_keys = list(slider_config.keys())
+        
+        for idx, feature_name in enumerate(slider_keys):
+            config = slider_config[feature_name]
+            target_col = col_left if idx % 2 == 0 else col_right
+            
+            with target_col:
+                custom_features[feature_name] = st.slider(
+                    config['label'],
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=config['default'],
+                    step=0.05,
+                    help=config['help'],
+                    key=f"custom_{feature_name}"
+                )
+        
+        # Tempo and loudness with their own ranges
+        col_tempo, col_loud = st.columns(2)
+        with col_tempo:
+            custom_features['tempo'] = st.slider(
+                "🥁 Tempo (BPM)",
+                min_value=40.0,
+                max_value=250.0,
+                value=120.0,
+                step=5.0,
+                help="Speed in beats per minute",
+                key="custom_tempo"
+            )
+        with col_loud:
+            custom_features['loudness'] = st.slider(
+                "🔊 Loudness (dB)",
+                min_value=-60.0,
+                max_value=0.0,
+                value=-10.0,
+                step=1.0,
+                help="Overall volume level",
+                key="custom_loudness"
+            )
+        
+        # Done button
+        if st.button("✅ Done – Get Recommendations", type="primary", key="customise_done", use_container_width=True):
+            with st.spinner("Finding songs matching your vibe..."):
+                try:
+                    recs = get_recommendations_from_features(
+                        features_dict=custom_features,
+                        track_id=st.session_state.customise_seed_id,
+                        k = 6
+                    )
+                    if recs:
+                        st.session_state.customise_recs = recs
+                        st.rerun()
+                    else:
+                        st.error("No recommendations found. Try adjusting sliders or rolling a new seed.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+    
+    # --- Display customised recommendations ---
+    if st.session_state.customise_recs:
+        st.write("---")
+        st.subheader("🎧 Your Custom Recommendations")
+        
+        for i, rec in enumerate(st.session_state.customise_recs):
+            with st.container():
+                try:
+                    track_info = sp.track(rec['track_id'])
+                    
+                    col_img, col_info_card = st.columns([1, 3])
+                    with col_img:
+                        if track_info["album"]["images"]:
+                            st.image(track_info["album"]["images"][1]["url"], width=150)
+                    
+                    with col_info_card:
+                        st.write(f"**{rec['track_name']}**")
+                        st.write(f"*{rec['artists']}*")
+                        
+                        similarity_percent = rec['similarity_score'] * 100
+                        st.progress(
+                            min(rec['similarity_score'], 1.0),
+                            text=f"Match: {similarity_percent:.1f}%"
+                        )
+                        
+                        if st.button("View", key=f"cust_{i}_{rec['track_id']}"):
+                            st.query_params["track_id"] = rec['track_id']
+                            st.session_state.recommendations = None
+                            st.session_state.current_track_for_rec = None
+                            st.rerun()
+                
+                except Exception:
+                    st.write(f"**{rec['track_name']}**")
+                    st.write(f"*{rec['artists']}*")
+                    similarity_percent = rec['similarity_score'] * 100
+                    st.progress(
+                        min(rec['similarity_score'], 1.0),
+                        text=f"Match: {similarity_percent:.1f}%"
+                    )
+                    if st.button("View", key=f"cust_{i}_{rec['track_id']}_fb"):
+                        st.query_params["track_id"] = rec['track_id']
+                        st.session_state.recommendations = None
+                        st.session_state.current_track_for_rec = None
+                        st.rerun()
+                
+                st.divider()
+        
+        if st.button("🗑️ Clear Results", key="clear_customise"):
+            st.session_state.customise_recs = None
+            st.rerun()

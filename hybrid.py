@@ -711,7 +711,7 @@ def get_hybrid_recommendations_for_user(
     k: int = 6
 ) -> Tuple[List[Dict], float, Dict]:
     """
-    Main entry point for the "For You" tab on the search page.
+    Main entry point for the "For You"  on the search page.
     
     1. Compute dynamic alpha from favourites ↔ charts overlap.
     2. Allocate round(alpha × k) slots to CF, remainder to CBF.
