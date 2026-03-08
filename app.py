@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 import spotipy
 import os
 from spotipy.oauth2 import SpotifyClientCredentials
-from hybrid import get_audio_features_with_fallback, get_recommendations_from_features, get_hybrid_recommendations_for_user, CollaborativeFilteringEngine
+from hybrid import get_audio_features_with_fallback, get_recommendations_from_features, get_hybrid_recommendations_for_user, CollaborativeFilteringEngine, valid_recommendations
 from auth import get_user_favourites, add_to_favourites, remove_from_favourites, is_favourite
 from dotenv import load_dotenv
 import yt_dlp
@@ -386,10 +386,9 @@ def display_recommendations_section(track_id, track, features):
     if st.button("Get Similar Songs", type="primary", key="get_recommendations"):
         with st.spinner("Finding similar songs..."):
             try:
-                recommendations = get_recommendations_from_features(
-                    features_dict=modified_features,
-                    track_id=track_id,
-                    k=6
+                recommendations = valid_recommendations(
+                    spotify_track_id=track_id,
+                    features_dict=modified_features
                 )
                 
                 if recommendations:

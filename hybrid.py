@@ -312,19 +312,6 @@ class ReccobeatsAPI:
                         'reccobeats_id': rid  # Store for fallback
                     })
 
-            # Handle edge case: not enough data for K-NN
-            if len(recs_with_features) < 2:
-                return [
-                    {
-                        'track_id': r['track_id'],
-                        'track_name': r['track_name'],
-                        'artists': r['artists'],
-                        'similarity_score': 0.8,
-                        'popularity': r['popularity'],
-                        'reccobeats_id': r['reccobeats_id']
-                    } for r in recs_with_features[:final_recommendations_count]
-                ]
-
             # 6. Run K-NN
             vectors = np.array([original_vector] + [r['feature_vector'] for r in recs_with_features])
             knn, scaled_vectors, _= train_knn(vectors, n_neighbors=final_recommendations_count + 1)
@@ -358,6 +345,62 @@ class ReccobeatsAPI:
         except Exception as e:
             print(f"Error in enhanced recommendations: {e}")
             return []
+
+    def get_valid_recommendations(
+        self,
+        spotify_track_id: str,
+        final_recommendations_count: int = 6,
+        og_feature: Optional[Dict] = None,
+        min_similarity: float = 0.7,
+        **filters
+    ) -> List[Dict]:
+        """
+        Wrapper around get_enhanced_recommendations that retries with
+        different popularity tiers until final_recommendations_count
+        songs above min_similarity are collected.
+        """
+        qualified_recs = []
+        seen_track_ids = set()
+        
+        popularity_tiers = [100,90,80,70,60,50,40,30,20,10,100,90,80,70,60,50,40,30,20,10]
+        
+        for round_num, pop_value in enumerate(popularity_tiers):
+            if len(qualified_recs) >= final_recommendations_count:
+                break
+            
+            # Build filters for this round
+            round_filters = dict(filters)
+            if pop_value is not None:
+                round_filters['popularity'] = pop_value
+            
+            recs = self.get_enhanced_recommendations(
+                spotify_track_id=spotify_track_id,
+                initial_recommendations_count=100,
+                final_recommendations_count=6,  # fetch more, we'll filter
+                original_features=og_feature,
+                **round_filters
+            )
+            
+            if not recs:
+                continue
+            
+            new_this_round = 0
+            for rec in recs:
+                if rec['track_id'] in seen_track_ids:
+                    continue
+                
+                seen_track_ids.add(rec['track_id'])
+                
+                if rec['similarity_score'] >= min_similarity:
+                    qualified_recs.append(rec)
+                    new_this_round += 1
+            
+            pop_label = f"popularity={pop_value}" if pop_value is not None else "no filter"
+            print(f"Round {round_num + 1} ({pop_label}): {len(qualified_recs)}/{final_recommendations_count} qualified (>= {min_similarity*100:.0f}%)")
+        
+        qualified_recs.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return qualified_recs[:final_recommendations_count]
+
         
 class CollaborativeFilteringEngine:
     """
@@ -812,6 +855,21 @@ def get_recommendations_from_features(
         original_features= features_dict if features_dict else None
     )
 
+def valid_recommendations(
+        features_dict: Dict,
+        spotify_track_id: str = None,
+        dataset_path: str = None,
+        k: int = 6
+) -> List[Dict]:
+    if not spotify_track_id:
+        return []
+    
+    api = ReccobeatsAPI()
+    return api.get_valid_recommendations(
+        spotify_track_id,
+        og_feature = features_dict if features_dict else None
+    )
+
 
 # UNIT TESTS
 
@@ -886,8 +944,9 @@ def test_enhanced_recommendations_with_batch():
     # Get enhanced recommendations
     enhanced_recommendations = api.get_enhanced_recommendations(
         creep_spotify_id,
-        initial_recommendations_count=100,
-        final_recommendations_count=6
+        initial_recommendations_count=40,
+        final_recommendations_count=6,
+        min_similarity= 0.7
     )
     
     if enhanced_recommendations:
@@ -1207,12 +1266,12 @@ if __name__ == "__main__":
     # test_batch_audio_features()
     
     # # Test enhanced recommendations with batch processing
-    # test_enhanced_recommendations_with_batch()
+    test_enhanced_recommendations_with_batch()
 
     # #Test hybrid recommendations
     # test_hybrid_cold_start()
     # test_hybrid_with_favourites()
 
     # # test favourite artists recomendation
-    test_artist_recommendations()
+    # test_artist_recommendations()
 
