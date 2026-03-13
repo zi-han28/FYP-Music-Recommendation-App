@@ -9,7 +9,9 @@ import time
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 import os
+import pickle
 from pathlib import Path
+
 
 
 # knn model
@@ -28,7 +30,7 @@ def train_knn(vectors: np.ndarray, n_neighbors: int = 10, scale: bool = True) ->
         scaled = scaler.fit_transform(vectors)
     else:
         scaled = vectors
-    
+
     k = min(n_neighbors, len(scaled))
     model = NearestNeighbors(n_neighbors=k, metric='cosine', algorithm='brute')
     model.fit(scaled)
@@ -475,6 +477,17 @@ class CollaborativeFilteringEngine:
     # ---- similarity model ----
     def _build_knn(self):
         """Build item-item KNN based on chart popularity proximity."""
+        cache_path = Path("knn_cache.pkl")
+
+        if cache_path.exists():
+            with open(cache_path, 'rb') as f:
+                cached = pickle.load(f)
+                self._knn_model = cached['model']
+                self._scaler = cached['scaler']
+                self._sorted_df = cached['df']
+                self._track_index_map = cached['index_map']
+                return
+        
         df = self.charts_df
         if df.empty:
             return
@@ -492,6 +505,14 @@ class CollaborativeFilteringEngine:
             for idx, row in df_sorted.iterrows()
             if pd.notna(row['spotify_id'])
         }
+
+        with open(cache_path, 'wb') as f:
+            pickle.dump({
+                'model': self._knn_model,
+                'scaler': self._scaler,
+                'df': self._sorted_df,
+                'index_map': self._track_index_map
+            }, f)
     
     # ---- CF recommendations ----
     
@@ -666,7 +687,7 @@ def dynamic_alpha(
     confidence_ratio = in_charts_count / total_favourites if total_favourites > 0 else 0
     
     alpha = confidence_ratio * 0.9
-    alpha = min(alpha, (k / 30) * 0.9)
+    alpha = min(alpha, (k / 10) * 0.9)
     
     return alpha
 
