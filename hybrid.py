@@ -317,7 +317,6 @@ class ReccobeatsAPI:
             # 6. Run K-NN
             vectors = np.array([original_vector] + [r['feature_vector'] for r in recs_with_features])
             knn, scaled_vectors, _= train_knn(vectors, n_neighbors=final_recommendations_count + 1)
-
             distances, indices= knn.kneighbors(scaled_vectors[0:1])
             
             final_recs = []
@@ -363,9 +362,8 @@ class ReccobeatsAPI:
         """
         qualified_recs = []
         seen_track_ids = set()
-        
+        # 
         popularity_tiers = [100,90,80,70,60,50,40,30,20,10,100,90,80,70,60,50,40,30,20,10]
-        
         for round_num, pop_value in enumerate(popularity_tiers):
             if len(qualified_recs) >= final_recommendations_count:
                 break
@@ -378,7 +376,7 @@ class ReccobeatsAPI:
             recs = self.get_enhanced_recommendations(
                 spotify_track_id=spotify_track_id,
                 initial_recommendations_count=100,
-                final_recommendations_count=6,  # fetch more, we'll filter
+                final_recommendations_count=6,
                 original_features=og_feature,
                 **round_filters
             )
@@ -447,9 +445,7 @@ class CollaborativeFilteringEngine:
             df = pd.read_csv(self.csv_path)
             max_pop = df['total_popularity_weight'].max()
             # Normalise to 0-100 (same scale as Reccobeats popularity parameter)
-            df['popularity_100'] = (
-                (df['total_popularity_weight'] / max_pop * 100.0) if max_pop > 0 else 0
-            )
+            df['popularity_100'] = ((df['total_popularity_weight'] / max_pop * 100.0) if max_pop > 0 else 0)
             return df
         except FileNotFoundError:
             print(f"Charts CSV not found at {self.csv_path}")
@@ -685,7 +681,6 @@ def dynamic_alpha(
     total_favourites = len(user_favourites)
     
     confidence_ratio = in_charts_count / total_favourites if total_favourites > 0 else 0
-    
     alpha = confidence_ratio * 0.9
     alpha = min(alpha, (k / 10) * 0.9)
     

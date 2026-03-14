@@ -15,7 +15,9 @@ class SentimentAnalyzer:
             return ""
         
         # Remove Genius section headers and common footer noise
+        # Remove [Chorus], [Verse] headers
         text = re.sub(r'\[.*?\]', '', text)
+        # Remove trailing embed text
         text = re.sub(r'\d*Embed$', '', text, flags=re.IGNORECASE)
         text = re.sub(r'You might also like', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\d+Contributors?', '', text)

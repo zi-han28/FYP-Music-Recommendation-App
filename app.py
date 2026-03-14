@@ -220,7 +220,7 @@ def get_cached_lyrics(track_name, artist_name):
         return lyrics_data
 
 def get_cached_sentiment(lyrics_text, track_name, artist_name):
-    """Get sentiment from cache or analyze if not cached."""
+   ####Get sentiment from cache or analyze if not cached.
     cache_key = f"{track_name}|{artist_name}"
     
     if cache_key in st.session_state.sentiment_cache:
@@ -566,7 +566,7 @@ if "track_id" in st.query_params:
     st.stop()
 
 # --- MAIN SEARCH PAGE ---
-st.title("My Music App")
+st.title("Music Recommendation App")
 tab_search, tab_fyp, tab_customise = st.tabs(["🔍 Search", "💿 For You", "🎚Customise"])
 
 
@@ -654,7 +654,7 @@ with tab_fyp:
     
     else:
         # --- Personalised hybrid recommendations ---
-        st.subheader("🎯 Recommended For You")
+        st.subheader("Recommended For You")
         
         col_info, col_refresh = st.columns([4, 1])
         with col_refresh:
@@ -775,7 +775,7 @@ with tab_customise:
         seed = random.choice(chart_seeds)
         st.session_state.customise_seed_id = seed['spotify_id']
     
-    if st.button("🔀 New Seed", key="reroll_seed"):
+    if st.button(" 🔄 New Seed", key="reroll_seed"):
         seed = random.choice(chart_seeds)
         st.session_state.customise_seed_id = seed['spotify_id']
         st.session_state.customise_recs = None
@@ -846,8 +846,7 @@ with tab_customise:
                     recs = get_recommendations_from_features(
                         features_dict=custom_features,
                         track_id=st.session_state.customise_seed_id,
-                        k = 6
-                    )
+                        k = 6)
                     if recs:
                         st.session_state.customise_recs = recs
                         st.rerun()
