@@ -1,4 +1,3 @@
-from tkinter import N
 from turtle import distance
 import requests
 import numpy as np
@@ -277,7 +276,7 @@ class ReccobeatsAPI:
                 features, _= self.get_audio_features(spotify_track_id)
                 if not features:
                     return []
-            original_vector = self.extract_audio_features_vector(features)
+            original_vector = self.extract_audio_features_vector(original_features)
             
             
             # 2. Get initial recommendations
