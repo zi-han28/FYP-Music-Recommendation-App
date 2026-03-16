@@ -101,10 +101,12 @@ if not st.session_state.logged_in:
 client_id = os.getenv("SPOTIPY_CLIENT_ID")
 client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
 
+
 # Ensure env vars are set for Spotipy
 os.environ["SPOTIPY_CLIENT_ID"] = client_id
 os.environ["SPOTIPY_CLIENT_SECRET"] = client_secret
 os.environ["SPOTIPY_REDIRECT_URI"] = "http://localhost:8501/callback" # Updated to localhost
+os.environ["GENIUS_CLIENT_ACCESS_TOKEN"] = st.secrets.get("GENIUS_CLIENT_ACCESS_TOKEN", "")
 
 # Initialize Spotify Client
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials())

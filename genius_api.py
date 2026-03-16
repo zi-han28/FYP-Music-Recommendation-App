@@ -1,8 +1,4 @@
 # genius_api.py
-"""
-Genius API integration for fetching song lyrics.
-"""
-
 import os
 import re  # Import regex module at the top
 from typing import Optional, Dict
