@@ -91,7 +91,7 @@ def run_unit_test():
         "I hate this, it is the worst day of my life.",
         "It was okay, not great but not terrible.",
         "I absolutely love this amazing song!",
-        "I'm feeling a bit down but I'll survive.", # Likely Slightly Negative
+        "I'm feeling a bit down but I'll survive.",
     ]
     
     for text in test_cases:

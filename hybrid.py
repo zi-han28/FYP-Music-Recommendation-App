@@ -277,7 +277,8 @@ class ReccobeatsAPI:
                 features, _= self.get_audio_features(spotify_track_id)
                 if not features:
                     return []
-            original_vector = self.extract_audio_features_vector(original_features)
+            original_vector = self.extract_audio_features_vector(features)
+            
             
             # 2. Get initial recommendations
             initial_recs = self.get_recommendations(
@@ -899,13 +900,15 @@ def test_batch_audio_features():
     api = ReccobeatsAPI()
     
     # First get Reccobeats IDs for some Spotify tracks
+    # Core test logic for batch audio feature retrieval
     test_spotify_ids = [
         "70LcF31zb1H0PyJoS1Sx1r",  # Creep - Radiohead
-        "11dFghVXANMlKmJXsNCbNl",  # Bohemian Rhapsody - Queen
+        "2aaCNg42RA74s0EmHTBqS7",  # No other heart - Mac Demarco
         "0UaMYEvWZi0ZqiDOoHU3YI",  # Blinding Lights - The Weeknd
     ]
     
     print("Getting Reccobeats IDs for test tracks...")
+    # Convert Spotify IDs to Reccobeats IDs
     reccobeats_ids = []
     for spotify_id in test_spotify_ids:
         track_details = api.get_track_details(spotify_id)
@@ -917,12 +920,13 @@ def test_batch_audio_features():
     
     if reccobeats_ids:
         print(f"\nGetting batch audio features for {len(reccobeats_ids)} Reccobeats IDs...")
+        # Batch retrieve audio features
         batch_features = api.get_batch_AF(reccobeats_ids, batch_size=3)
         
         if batch_features:
             print(f"\n✅ Retrieved {len(batch_features)} audio features")
             print("-" * 40)
-            
+            # Validate expected features exist
             for i, features in enumerate(batch_features):
                 reccobeats_id = features.get('id', 'Unknown')
                 print(f"\n{i+1}. Reccobeats ID: {reccobeats_id}")
@@ -942,7 +946,7 @@ def test_batch_audio_features():
     return batch_features
 
 
-def test_enhanced_recommendations_with_batch():
+def test_valid_recommendations_with_batch():
     """Test enhanced recommendations using batch processing."""
     print("=" * 60)
     print("Testing Enhanced Recommendations with Batch Processing")
@@ -958,11 +962,8 @@ def test_enhanced_recommendations_with_batch():
     print("-" * 40)
     
     # Get enhanced recommendations
-    enhanced_recommendations = api.get_enhanced_recommendations(
-        creep_spotify_id,
-        initial_recommendations_count=40,
-        final_recommendations_count=6,
-        min_similarity= 0.7
+    enhanced_recommendations = api.get_valid_recommendations(
+        creep_spotify_id
     )
     
     if enhanced_recommendations:
@@ -1123,10 +1124,6 @@ def test_hybrid_with_favourites():
 
 
 def test_artist_recommendations():
-    """
-    Test the get_artist_recommendations function with Radiohead's "Creep".
-    Checks if it can identify Radiohead in the charts and return other songs by the artist.
-    """
     print("=" * 60)
     print("Testing Artist Recommendations for Radiohead")
     print("=" * 60)
@@ -1282,12 +1279,12 @@ if __name__ == "__main__":
     # test_batch_audio_features()
     
     # # Test enhanced recommendations with batch processing
-    test_enhanced_recommendations_with_batch()
+    # test_valid_recommendations_with_batch()
 
     # #Test hybrid recommendations
     # test_hybrid_cold_start()
     # test_hybrid_with_favourites()
 
     # # test favourite artists recomendation
-    # test_artist_recommendations()
+    test_artist_recommendations()
 
