@@ -9,10 +9,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class GeniusAPI:
+    # def __init__(self):
+    #     self.access_token = os.getenv("GENIUS_CLIENT_ACCESS_TOKEN")
+    #     if not self.access_token:
+    #         raise ValueError("GENIUS_CLIENT_ACCESS_TOKEN not found in environment variables")
     def __init__(self):
         self.access_token = os.getenv("GENIUS_CLIENT_ACCESS_TOKEN")
         if not self.access_token:
-            raise ValueError("GENIUS_CLIENT_ACCESS_TOKEN not found in environment variables")
+            try:
+                import streamlit as st
+                self.access_token = st.secrets.get("GENIUS_CLIENT_ACCESS_TOKEN")
+            except Exception:
+                pass
+        if not self.access_token:
+            raise ValueError("GENIUS_CLIENT_ACCESS_TOKEN not found in environment variables or Streamlit secrets")
         
         self.genius = lyricsgenius.Genius(
             self.access_token,
