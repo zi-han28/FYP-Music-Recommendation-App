@@ -1,62 +1,126 @@
 # genius_api.py
 import os
-import re  # Import regex module at the top
+import re
 from typing import Optional, Dict
+import requests as http_requests
 import lyricsgenius
 from dotenv import load_dotenv
+
+try:
+    import bs4
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+
+try:
+    from unidecode import unidecode
+except ImportError:
+    def unidecode(s):
+        return s
 
 # Load environment variables
 load_dotenv()
 
+
 class GeniusAPI:
     def __init__(self):
         self.access_token = os.getenv("GENIUS_CLIENT_ACCESS_TOKEN")
-        if not self.access_token:
-            raise ValueError("GENIUS_CLIENT_ACCESS_TOKEN not found in environment variables")
+        self.genius = None
+        self.api_available = False
         
-        self.genius = lyricsgenius.Genius(
-            self.access_token,
-            # Configuration options
-            remove_section_headers=True,
-            skip_non_songs=True,
-            excluded_terms=["(Remix)", "(Live)", "(Demo)", "(Acoustic)", "(Cover)"],
-            timeout=10,
-            retries=3
-        )
-        self.genius.verbose = False  # Disable verbose logging
-        self.genius.remove_section_headers = True  # Remove [Chorus], [Verse], etc.
+        if self.access_token:
+            try:
+                self.genius = lyricsgenius.Genius(
+                    self.access_token,
+                    remove_section_headers=True,
+                    skip_non_songs=True,
+                    excluded_terms=["(Remix)", "(Live)", "(Demo)", "(Acoustic)", "(Cover)"],
+                    timeout=10,
+                    retries=3
+                )
+                self.genius.verbose = False
+                self.genius.remove_section_headers = True
+                self.api_available = True
+                print("Genius API initialized with access token.")
+            except Exception as e:
+                print(f"Genius API key failed: {e}. Will use web scraping fallback.")
+        else:
+            print("No Genius API token found. Using web scraping fallback.")
     
-    def get_lyrics(self, track_name: str, artist_name: str) -> Optional[str]:
+    # --- WEB SCRAPING FALLBACK ---
+    
+    def _scrape_lyrics(self, track_name: str, artist_name: str) -> Optional[str]:
         """
-        Search for and retrieve lyrics for a specific track.
+        Fallback: scrape lyrics directly from Genius website.
+        Does not require an API key.
+        """
+        if not BS4_AVAILABLE:
+            print("bs4 not installed — cannot scrape lyrics.")
+            return None
         
-        Args:
-            track_name: Name of the track
-            artist_name: Name of the artist
-            
-        Returns:
-            Lyrics text or None if not found
-        """
         try:
-            # Clean up the track name (remove featured artists, versions, etc.)
-            clean_track_name = self._clean_track_name(track_name)
+            # Normalise artist and title for URL construction
+            artist = unidecode(artist_name).lower().replace(" ", "-").replace("'", "")
+            title = unidecode(track_name).lower()
+            title = re.sub(r"\(.*?\)", "", title).strip()
+            title = title.replace(" ", "-").replace("'", "")
             
-            # Search for the song
-            song = self.genius.search_song(title=clean_track_name, artist=artist_name)
+            url = f"https://genius.com/{artist}-{title}-lyrics"
+            print(f"Scraping lyrics from: {url}")
             
-            if song and song.lyrics:
-                return self._clean_lyrics(song.lyrics)
+            r = http_requests.get(url, timeout=10)
+            r.raise_for_status()
             
-            # If not found, try with original track name
-            song = self.genius.search_song(title=track_name, artist=artist_name)
-            if song and song.lyrics:
-                return self._clean_lyrics(song.lyrics)
+            soup = bs4.BeautifulSoup(r.text, "html.parser")
             
+            # Find all lyrics containers
+            containers = soup.find_all(attrs={"data-lyrics-container": "true"})
+            if not containers:
+                return None
+            
+            # Extract text from each container
+            lyrics_parts = []
+            for container in containers:
+                # Replace <br> tags with newlines before extracting text
+                for br in container.find_all("br"):
+                    br.replace_with("\n")
+                lyrics_parts.append(container.get_text("\n"))
+            
+            raw_lyrics = "\n".join(lyrics_parts)
+            
+            # Clean up multiple blank lines
+            cleaned = re.sub(r"\n\n+", "\n\n", raw_lyrics).strip()
+            
+            if cleaned:
+                return self._clean_lyrics(cleaned)
             return None
             
         except Exception as e:
-            print(f"Error fetching lyrics for {track_name} by {artist_name}: {e}")
+            print(f"Scraping fallback failed for {track_name} by {artist_name}: {e}")
             return None
+    
+    # --- PRIMARY LYRICS RETRIEVAL ---
+    
+    def get_lyrics(self, track_name: str, artist_name: str) -> Optional[str]:
+        # Try API first if available
+        if self.api_available:
+            try:
+                clean_track_name = self._clean_track_name(track_name)
+                song = self.genius.search_song(title=clean_track_name, artist=artist_name)
+                
+                if song and song.lyrics:
+                    return self._clean_lyrics(song.lyrics)
+                
+                song = self.genius.search_song(title=track_name, artist=artist_name)
+                if song and song.lyrics:
+                    return self._clean_lyrics(song.lyrics)
+                    
+            except Exception as e:
+                print(f"API error for {track_name} by {artist_name}: {e}")
+        
+        # Fallback to web scraping
+        print(f"Falling back to web scraping for: {track_name} by {artist_name}")
+        return self._scrape_lyrics(track_name, artist_name)
     
     def _clean_track_name(self, track_name: str) -> str:
         """Remove common suffixes and features from track names."""
@@ -134,67 +198,74 @@ class GeniusAPI:
     def get_lyrics_with_info(self, track_name: str, artist_name: str) -> Dict:
         """
         Get lyrics along with additional information.
-        
-        Returns:
-            Dictionary with lyrics and metadata
+        Tries API first, falls back to web scraping.
         """
-        try:
-            # Clean up the track name
-            clean_track_name = self._clean_track_name(track_name)
-            
-            # Search for the song
-            song = self.genius.search_song(title=clean_track_name, artist=artist_name)
-            
-            if not song:
-                # Try with original track name
-                song = self.genius.search_song(title=track_name, artist=artist_name)
-            
-            if song and song.lyrics:
-                # Get metadata safely (some attributes might not exist)
-                result = {
-                    'lyrics': self._clean_lyrics(song.lyrics),
-                    'title': getattr(song, 'title', track_name),
-                    'artist': getattr(song, 'artist', artist_name),
-                    'url': getattr(song, 'url', f"https://genius.com/search?q={track_name.replace(' ', '+')}+{artist_name.replace(' ', '+')}"),
-                    'thumbnail': getattr(song, 'song_art_image_url', None)
-                }
+        # Try API first if available
+        if self.api_available:
+            try:
+                clean_track_name = self._clean_track_name(track_name)
+                song = self.genius.search_song(title=clean_track_name, artist=artist_name)
                 
-                # Try to get album info if available
-                try:
-                    result['album'] = getattr(song, 'album', None)
-                except:
-                    result['album'] = None
+                if not song:
+                    song = self.genius.search_song(title=track_name, artist=artist_name)
                 
-                # Try to get release year if available
-                try:
-                    result['release_date'] = getattr(song, 'release_date', None)
-                    # If release_date is not available, try to get year from other attributes
-                    if not result['release_date']:
-                        result['release_date'] = getattr(song, 'release_date_for_display', None)
-                except:
-                    result['release_date'] = None
-                
-                return result
+                if song and song.lyrics:
+                    result = {
+                        'lyrics': self._clean_lyrics(song.lyrics),
+                        'title': getattr(song, 'title', track_name),
+                        'artist': getattr(song, 'artist', artist_name),
+                        'url': getattr(song, 'url', f"https://genius.com/search?q={track_name.replace(' ', '+')}+{artist_name.replace(' ', '+')}"),
+                        'thumbnail': getattr(song, 'song_art_image_url', None)
+                    }
+                    
+                    try:
+                        result['album'] = getattr(song, 'album', None)
+                    except:
+                        result['album'] = None
+                    
+                    try:
+                        result['release_date'] = getattr(song, 'release_date', None)
+                        if not result['release_date']:
+                            result['release_date'] = getattr(song, 'release_date_for_display', None)
+                    except:
+                        result['release_date'] = None
+                    
+                    return result
+                    
+            except Exception as e:
+                print(f"API error in get_lyrics_with_info: {e}")
+        
+        # Fallback to web scraping
+        print(f"Falling back to web scraping for: {track_name} by {artist_name}")
+        scraped_lyrics = self._scrape_lyrics(track_name, artist_name)
+        
+        if scraped_lyrics:
+            # Build URL for reference
+            artist_slug = unidecode(artist_name).lower().replace(" ", "-").replace("'", "")
+            title_slug = unidecode(track_name).lower()
+            title_slug = re.sub(r"\(.*?\)", "", title_slug).strip().replace(" ", "-").replace("'", "")
             
-            return {'lyrics': None, 'error': 'Lyrics not found'}
-            
-        except Exception as e:
-            print(f"Error in get_lyrics_with_info: {e}")
-            return {'lyrics': None, 'error': str(e)}
+            return {
+                'lyrics': scraped_lyrics,
+                'title': track_name,
+                'artist': artist_name,
+                'url': f"https://genius.com/{artist_slug}-{title_slug}-lyrics",
+                'thumbnail': None,
+                'album': None,
+                'release_date': None
+            }
+        
+        return {'lyrics': None, 'error': 'Lyrics not found via API or web scraping'}
 
 
 # Singleton instance
 _genius_api = None
 
 def get_genius_api() -> GeniusAPI:
-    """Get or create Genius API instance."""
+    """Get or create Genius API instance. Always succeeds — falls back to scraping if no API key."""
     global _genius_api
     if _genius_api is None:
-        try:
-            _genius_api = GeniusAPI()
-        except Exception as e:
-            print(f"Failed to initialize Genius API: {e}")
-            return None
+        _genius_api = GeniusAPI()
     return _genius_api
 
 

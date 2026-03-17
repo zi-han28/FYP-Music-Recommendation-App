@@ -5,12 +5,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 import spotipy
 import os
-try:
-    for key in ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET", "GENIUS_CLIENT_ACCESS_TOKEN"]:
-        if key in st.secrets and key not in os.environ:
-            os.environ[key] = st.secrets[key]
-except Exception:
-    pass
 from spotipy.oauth2 import SpotifyClientCredentials
 from hybrid import get_audio_features_with_fallback, get_recommendations_from_features, get_hybrid_recommendations_for_user, CollaborativeFilteringEngine, valid_recommendations
 from auth import get_user_favourites, add_to_favourites, remove_from_favourites, is_favourite
