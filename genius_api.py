@@ -5,27 +5,61 @@ from typing import Optional, Dict
 import lyricsgenius
 from dotenv import load_dotenv
 import streamlit as st
+import traceback
 
 # Load environment variables
 load_dotenv()
 
 class GeniusAPI:
     def __init__(self):
-        self.access_token = st.secrets("GENIUS_CLIENT_ACCESS_TOKEN")
-        if not self.access_token:
-            raise ValueError("GENIUS_CLIENT_ACCESS_TOKEN not found in environment variables")
+        # Debug: Check how we're accessing secrets
+        print("=== DEBUG: GeniusAPI Initialization ===")
+        print(f"Has st.secrets: {hasattr(st, 'secrets')}")
         
-        self.genius = lyricsgenius.Genius(
-            self.access_token, 
-            # Configuration options
-            remove_section_headers=True,
-            skip_non_songs=True,
-            excluded_terms=["(Remix)", "(Live)", "(Demo)", "(Acoustic)", "(Cover)"],
-            timeout=10,
-            retries=3
-        )
-        self.genius.verbose = False  # Disable verbose logging
-        self.genius.remove_section_headers = True  # Remove [Chorus], [Verse], etc.
+        if hasattr(st, 'secrets'):
+            print(f"Secrets available: {list(st.secrets.keys()) if st.secrets else 'None'}")
+        
+        # Try different ways to get the token
+        self.access_token = None
+        
+        # Method 1: Try st.secrets (Streamlit Cloud)
+        if hasattr(st, 'secrets') and st.secrets:
+            try:
+                self.access_token = st.secrets.get("GENIUS_CLIENT_ACCESS_TOKEN")
+                print(f"Method 1 (st.secrets): Token found = {self.access_token is not None}")
+                if self.access_token:
+                    print(f"Token starts with: {self.access_token[:10]}...")
+            except Exception as e:
+                print(f"Error accessing st.secrets: {e}")
+        
+        # Method 2: Try os.getenv (for local development)
+        if not self.access_token:
+            self.access_token = os.getenv("GENIUS_CLIENT_ACCESS_TOKEN")
+            print(f"Method 2 (os.getenv): Token found = {self.access_token is not None}")
+        
+        if not self.access_token:
+            error_msg = "GENIUS_CLIENT_ACCESS_TOKEN not found in st.secrets or environment variables"
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg)
+        
+        print("Initializing Genius client...")
+        try:
+            self.genius = lyricsgenius.Genius(
+                self.access_token,
+                remove_section_headers=True,
+                skip_non_songs=True,
+                excluded_terms=["(Remix)", "(Live)", "(Demo)", "(Acoustic)", "(Cover)"],
+                timeout=10,
+                retries=3
+            )
+            self.genius.verbose = True  # Enable verbose for debugging
+            self.genius.remove_section_headers = True
+            self.api_available = True
+            print("Genius API initialized successfully!")
+        except Exception as e:
+            print(f"Failed to initialize Genius client: {e}")
+            print(traceback.format_exc())
+            raise
     
     def get_lyrics(self, track_name: str, artist_name: str) -> Optional[str]:
         try:
