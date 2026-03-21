@@ -14,6 +14,55 @@ from genius_api import get_lyrics_with_info
 from BERT_analysis import SentimentAnalyzer
 from auth import init_db, create_user, authenticate_user
 
+# Add this function near the top of app.py (after imports)
+def debug_genius_connection():
+    """Debug function to test Genius API connection"""
+    st.sidebar.write("---")
+    st.sidebar.subheader("🔧 Genius API Debug")
+    
+    # Check secrets availability
+    st.sidebar.write(f"Has st.secrets: {hasattr(st, 'secrets')}")
+    
+    if hasattr(st, 'secrets'):
+        if st.secrets:
+            st.sidebar.write(f"Secrets keys: {list(st.secrets.keys())}")
+            has_genius = "GENIUS_CLIENT_ACCESS_TOKEN" in st.secrets
+            st.sidebar.write(f"Genius token in secrets: {has_genius}")
+        else:
+            st.sidebar.write("st.secrets exists but is empty")
+    
+    # Check environment variable
+    genius_token_env = os.getenv("GENIUS_CLIENT_ACCESS_TOKEN")
+    st.sidebar.write(f"GENIUS_CLIENT_ACCESS_TOKEN in env: {bool(genius_token_env)}")
+    
+    # Test button
+    if st.sidebar.button("Test Genius API Connection"):
+        st.sidebar.write("Testing connection...")
+        try:
+            from genius_api import get_lyrics
+            test_lyrics = get_lyrics("Bohemian Rhapsody", "Queen")
+            if test_lyrics:
+                st.sidebar.success(f"✅ Success! Lyrics found ({len(test_lyrics)} chars)")
+                with st.sidebar.expander("Preview"):
+                    st.sidebar.text(test_lyrics[:200])
+            else:
+                st.sidebar.error("❌ No lyrics found for test song")
+        except Exception as e:
+            st.sidebar.error(f"❌ Error: {str(e)}")
+            st.sidebar.code(traceback.format_exc())
+    
+    # Show the full error if something went wrong during initialization
+    try:
+        from genius_api import get_genius_api
+        api = get_genius_api()
+        if api:
+            st.sidebar.success("✅ Genius API initialized")
+        else:
+            st.sidebar.error("❌ Genius API failed to initialize")
+    except Exception as e:
+        st.sidebar.error(f"❌ Initialization error: {e}")
+        st.sidebar.code(traceback.format_exc())
+
 # --- INITIAL SETUP ---
 init_db()
 load_dotenv()
@@ -205,6 +254,8 @@ with st.sidebar:
         logout()
     st.divider()
 
+    debug_genius_connection()
+    
     display_favourites_in_sidebar()
 
 # --- LYRICS---
