@@ -4,18 +4,19 @@ import re
 from typing import Optional, Dict
 import lyricsgenius
 from dotenv import load_dotenv
+import streamlit as st
 
 # Load environment variables
 load_dotenv()
 
 class GeniusAPI:
     def __init__(self):
-        self.access_token = os.getenv("GENIUS_CLIENT_ACCESS_TOKEN")
+        self.access_token = st.secrets("GENIUS_CLIENT_ACCESS_TOKEN")
         if not self.access_token:
             raise ValueError("GENIUS_CLIENT_ACCESS_TOKEN not found in environment variables")
         
         self.genius = lyricsgenius.Genius(
-            self.access_token,
+            self.access_token, 
             # Configuration options
             remove_section_headers=True,
             skip_non_songs=True,
