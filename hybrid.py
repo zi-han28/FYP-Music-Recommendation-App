@@ -413,7 +413,7 @@ class CollaborativeFilteringEngine:
     comparable and blendable.
     """
     
-    def __init__(self, csv_path: str = "final_charts_updated.csv"):
+    def __init__(self, csv_path: str = "popularity_chart.csv"):
         self.csv_path = csv_path
         self._charts_df = None
         self._spotify_id_set = None
@@ -765,7 +765,7 @@ def get_cbf_recommendations_from_favourites(
 
 def get_hybrid_recommendations_for_user(
     user_favourites: List[Dict],
-    charts_csv_path: str = "final_charts_updated.csv",
+    charts_csv_path: str = "popularity_chart.csv",
     k: int = 6
 ) -> Tuple[List[Dict], float, Dict]:
     """
@@ -991,7 +991,7 @@ def test_hybrid_cold_start():
 
     recommendations, alpha, debug_info = get_hybrid_recommendations_for_user(
         user_favourites,
-        charts_csv_path="final_charts_updated.csv",
+        charts_csv_path="popularity_chart.csv",
         k=6
     )
 
@@ -1056,7 +1056,7 @@ def test_hybrid_with_favourites():
     ]
 
     # Check which favourites are in the charts
-    cf_engine = CollaborativeFilteringEngine("final_charts_updated.csv")
+    cf_engine = CollaborativeFilteringEngine("popularity_chart.csv")
     print("\n🔍 Checking favourites against charts CSV:")
     for fav in user_favourites:
         tid = fav['track_id']
@@ -1067,7 +1067,7 @@ def test_hybrid_with_favourites():
     # Run hybrid
     recommendations, alpha, debug_info = get_hybrid_recommendations_for_user(
         user_favourites,
-        charts_csv_path="final_charts_updated.csv",
+        charts_csv_path="popularity_chart.csv",
         k=6
     )
 
@@ -1127,7 +1127,7 @@ def test_artist_recommendations():
     print("=" * 60)
     
     # Initialize the CF engine
-    cf_engine = CollaborativeFilteringEngine("final_charts_updated.csv")
+    cf_engine = CollaborativeFilteringEngine("popularity_chart.csv")
     
     # Test track: "Creep" by Radiohead
     test_spotify_id = "6b2oQwSGFkzsMtQruIWm2p"

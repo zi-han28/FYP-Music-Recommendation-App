@@ -629,7 +629,7 @@ with tab_fyp:
         st.subheader("🔥 Popular Tracks")
         st.caption("Add songs to your favourites to get personalised recommendations!")
         
-        cf_engine = CollaborativeFilteringEngine("final_charts_updated.csv")
+        cf_engine = CollaborativeFilteringEngine("popularity_chart.csv")
         popular = cf_engine.get_popular_tracks(k=6)
         
         if popular:
@@ -669,7 +669,7 @@ with tab_fyp:
             with st.spinner("Building your personalised recommendations..."):
                 hybrid_recs, alpha, debug_info = get_hybrid_recommendations_for_user(
                     favourites,
-                    charts_csv_path="final_charts_updated.csv",
+                    charts_csv_path="popularity_chart.csv",
                     k=6
                 )
                 st.session_state.hybrid_recs_cache = (hybrid_recs, alpha, debug_info)
@@ -763,7 +763,7 @@ with tab_customise:
     def load_chart_seeds():
         """Load first 5000 rows of charts CSV for random seeding."""
         try:
-            df = pd.read_csv("final_charts_updated.csv")
+            df = pd.read_csv("popularity_chart.csv")
             df = df.head(5000)
             df = df.dropna(subset=['spotify_id'])
             return df[['title', 'artist', 'spotify_id']].to_dict('records')

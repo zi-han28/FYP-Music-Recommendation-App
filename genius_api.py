@@ -56,30 +56,6 @@ class GeniusAPI:
         cleaned = re.sub(r'\[[^\]]*\]', '', cleaned)    # Remove [feat. ...]
         cleaned = re.sub(r'- .*$', '', cleaned)         # Remove - Radio Edit, etc.
         
-        # Remove common suffixes
-        suffixes = [
-            " - Radio Edit",
-            " - Single Version",
-            " - Album Version",
-            " - Remastered",
-            " - Remaster",
-            " (Remastered)",
-            " (Remaster)",
-            " (Single Version)",
-            " (Album Version)",
-            " (Radio Edit)",
-            " (Clean)",
-            " (Explicit)",
-            " (Official Video)",
-            " (Official Audio)",
-            " (Music Video)",
-            " (Visualizer)",
-            " (Lyric Video)"
-        ]
-        
-        for suffix in suffixes:
-            cleaned = cleaned.replace(suffix, "")
-        
         return cleaned.strip()
     
     def _clean_lyrics(self, lyrics: str) -> str:
